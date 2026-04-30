@@ -39,20 +39,46 @@ def research_node(state: AgentState):
 def final_node(state: AgentState):
 
     content = f"""
-    News:
-    {state.get("news", "")}
+You are a senior AI analyst.
 
-    Research:
-    {state.get("research", "")}
+DATA:
+NEWS:
+{state.get("news", "")}
 
-    Create final AI digest:
-    - Top News
-    - Key Research
-    - Insight
-    """
+RESEARCH:
+{state.get("research", "")}
+
+---
+
+STRICT RULES:
+- ONLY use facts explicitly present in the data
+- DO NOT invent numbers, funding, or events
+- If unsure → omit the item
+
+---
+
+TASK:
+
+📊 AI DAILY DIGEST
+
+📰 Top News (max 3):
+- One-line factual updates (no exaggeration)
+
+📄 Key Research (max 3):
+- Title + why it matters
+
+🧠 Insights:
+- Identify REAL trends from data
+- Avoid generic statements like "AI is growing"
+- Connect insights directly to news/research
+
+---
+
+Be concise, factual, and analytical.
+"""
 
     from langchain_groq import ChatGroq
-    llm = ChatGroq(model="llama-3.1-70b-versatile")
+    llm = ChatGroq(model="llama-3.1-8b-instant")
 
     response = llm.invoke(content)
 

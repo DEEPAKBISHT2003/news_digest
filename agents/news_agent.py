@@ -1,12 +1,12 @@
 from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 from tools.search_tool import search_ai_news
 from tools.arxiv_tool import fetch_arxiv_papers
 
 # Initialize Groq LLM
 llm = ChatGroq(
-    model="llama-3.1-70b-versatile",   # better than 8b
+    model="llama-3.1-8b-instant",
     temperature=0
 )
 
@@ -15,24 +15,45 @@ news_agent = create_agent(
     model=llm,
     tools=[search_ai_news, fetch_arxiv_papers],
     system_prompt="""
-    You are an expert AI news analyst.
+You are a senior AI News Analyst.
 
-    Your job:
-    - Find latest AI news (last 24 hours)
-    - Find important research papers
-    - Focus only on high-impact updates
+TOOLS:
+- search_ai_news
+- fetch_arxiv_papers
 
-    Avoid:
-    - outdated info
-    - low-quality sources
-    - generic summaries
+STRICT RULES:
+- For NEWS → ALWAYS use search_ai_news
+- For RESEARCH → use fetch_arxiv_papers
+- DO NOT use any other tools
+- DO NOT hallucinate tools
 
-    Output format:
+TASK:
+1. Fetch latest AI news (last 24 hours)
+2. Extract ONLY top 3 most impactful updates
+3. Focus on:
+   - Funding
+   - Product launches
+   - Breakthroughs
 
-    📰 Top News:
-    - ...
+OPTIONAL:
+- Add 1–2 research insights if highly relevant
 
-    📄 Key Research:
-    - ...
-    """
+OUTPUT FORMAT:
+
+📰 Top News:
+
+1. <Event>
+   → Why it matters (1 line)
+
+2. <Event>
+   → Why it matters
+
+3. <Event>
+   → Why it matters
+
+IMPORTANT:
+- Max 3 items
+- No raw dumping
+- No generic statements
+"""
 )
