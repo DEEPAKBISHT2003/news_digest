@@ -25,12 +25,12 @@
 #     print("\n📊 FINAL AI DIGEST:\n")
 #     print(result["final"])
 
-
 from dotenv import load_dotenv
+load_dotenv()
 import os
 from graph.workflow import build_graph
 
-load_dotenv()
+
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     app = build_graph()
 
-    # 🔥 ADD THIS BLOCK (visualization)
+    # 🔥 Visualize workflow
     try:
         png = app.get_graph().draw_mermaid_png()
         with open("workflow.png", "wb") as f:
@@ -50,15 +50,26 @@ if __name__ == "__main__":
     except Exception as e:
         print("⚠️ Could not generate graph image:", e)
 
-    # 🚀 Run pipeline
-    result = app.invoke({
+    # 🚀 Initial state (IMPORTANT FIX)
+    initial_state = {
         "query": "latest AI news",
+
         "news": "",
         "research": "",
+
         "run_news": False,
         "run_research": False,
+
+        "evaluation": {},
+        "is_valid": True,
+        "confidence": 1.0,
+
+        "processed": "",
         "final": ""
-    })
+    }
+
+    # 🚀 Run pipeline
+    result = app.invoke(initial_state)
 
     print("\n📊 FINAL AI DIGEST:\n")
     print(result["final"])
