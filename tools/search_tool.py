@@ -1,51 +1,68 @@
-from langchain_tavily import TavilySearch
+from serpapi import GoogleSearch
 from langchain_core.tools import tool
-from utils.date_utils import get_current_date_context
 import os
-from dotenv import load_dotenv
-from datetime import datetime, timedelta
-
-load_dotenv()
-
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-
-# 🔥 CRITICAL: restrict to last 1 day
-search = TavilySearch(max_results=10, days=1)
 
 
-def is_recent(date_str):
-    try:
-        # Handle ISO format
-        published = datetime.fromisoformat(date_str.replace("Z", ""))
-        return published >= datetime.utcnow() - timedelta(days=1)
-    except:
+def is_recent(date_str: str) -> bool:
+    """
+    Keep only last ~24 hours using relative time
+    Examples:
+    - '2 hours ago' ✅
+    - '45 minutes ago' ✅
+    - 'Today' ✅
+    - '1 day ago' ❌
+    """
+
+    if not date_str:
         return False
+
+    d = date_str.lower()
+
+    if any(x in d for x in ["minute", "hour", "today"]):
+        return True
+
+    if "day" in d:
+        return False
+
+    return False
 
 
 @tool
 def search_ai_news(query: str) -> dict:
     """
-    Search latest AI news strictly from last 24 hours
+    Fetch latest AI news using Google News (SerpAPI)
     """
 
-    date = get_current_date_context()
-
-    dynamic_query = f"""
-    {query}
-    AI startup funding OR AI product launch OR AI research breakthrough
-    """
+    params = {
+        "engine": "google_news",
+        "q": f"{query} AI OR artificial intelligence",
+        "hl": "en",
+        "gl": "in",
+        "api_key": os.getenv("SERPAPI_API_KEY")
+    }
 
     try:
-        results = search.invoke(dynamic_query)
+        search = GoogleSearch(params)
+        results = search.get_dict()
     except Exception as e:
         return {"error": str(e)}
 
     clean_results = []
 
-    for r in results.get("results", []):
+    for item in results.get("news_results", []):
 
-        # ❌ remove junk
-        if any(bad in r["url"] for bad in [
+        title = item.get("title")
+        snippet = item.get("snippet")
+        link = item.get("link")
+        source = item.get("source")
+        date = item.get("date")  # e.g. "2 hours ago"
+
+        # 🔥 strict 24h filter
+        if not is_recent(date):
+            continue
+
+        # ❌ remove junk domains (extra safety)
+        if any(bad in (link or "") for bad in [
             "instagram.com",
             "facebook.com",
             "pinterest.com",
@@ -53,25 +70,12 @@ def search_ai_news(query: str) -> dict:
         ]):
             continue
 
-        # 🔥 enforce time filter
-        pub_date = r.get("published_date")
-
-        if pub_date and not is_recent(pub_date):
-            continue
-
         clean_results.append({
-            "title": r["title"],
-            "content": r["content"][:200],
-            "url": r["url"],
-            "published_date": pub_date
+            "title": title,
+            "content": snippet,
+            "url": link,
+            "source": source,
+            "published_date": date
         })
 
-    # 🔥 keyword filter (kept)
-    important_keywords = ["AI", "model", "agent", "startup"]
-
-    filtered_results = [
-        r for r in clean_results
-        if any(k.lower() in (r["title"] + r["content"]).lower() for k in important_keywords)
-    ]
-
-    return {"results": filtered_results[:5]}
+    return {"results": clean_results[:5]}
