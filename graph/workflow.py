@@ -2,510 +2,437 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict
 import json
 import re
-from urllib.parse import urlparse
-from collections import Counter
 
-# Agents
-from tools.search_tool import search_ai_news
-from agents.evaluator_agent import evaluator_agent
-from agents.corrector_agent import corrector_agent
-from agents.signal_processor_agent import signal_agent
-from agents.news_agent import news_agent
-from agents.research_agent import research_agent
-from agents.writer_agent import writer_agent
-from agents.supervisor_agent import supervisor_decision
+from tools.search_tool import search_news
+
+# Import router
+from agents.core.router_agent import category_router_agent
+
+# Import evaluators
+from agents.core.evaluator_agent import evaluator_agent
+from agents.core.corrector_agent import corrector_agent
+
+# Import domain agents
+from agents.ai.ai_news_agent import ai_news_agent
+from agents.ai.ai_relevance_agent import ai_relevance_agent
+from agents.ai.ai_research_agent import ai_research_agent
+from agents.ai.ai_signal_agent import ai_signal_agent
+from agents.ai.ai_writer_agent import ai_writer_agent
+
+from agents.sports.sports_news_agent import sports_news_agent
+from agents.sports.sports_match_analysis_agent import sports_match_analysis_agent
+from agents.sports.sports_statistics_agent import sports_statistics_agent
+from agents.sports.sports_signal_agent import sports_signal_agent
+from agents.sports.sports_writer_agent import sports_writer_agent
+
+from agents.finance.finance_news_agent import finance_news_agent
+from agents.finance.market_analysis_agent import market_analysis_agent
+from agents.finance.economy_agent import economy_agent
+from agents.finance.finance_signal_agent import finance_signal_agent
+from agents.finance.finance_writer_agent import finance_writer_agent
+
+from agents.politics.politics_news_agent import politics_news_agent
+from agents.politics.policy_analysis_agent import policy_analysis_agent
+from agents.politics.geopolitics_agent import geopolitics_agent
+from agents.politics.political_signal_agent import political_signal_agent
+from agents.politics.politics_writer_agent import politics_writer_agent
+
+from agents.incidents.incidents_news_agent import incidents_news_agent
+from agents.incidents.crisis_verification_agent import crisis_verification_agent
+from agents.incidents.severity_classification_agent import severity_classification_agent
+from agents.incidents.incidents_signal_agent import incidents_signal_agent
+from agents.incidents.incidents_writer_agent import incidents_writer_agent
+
+from agents.general.general_news_agent import general_news_agent
+from agents.general.general_relevance_agent import general_relevance_agent
+from agents.general.general_analysis_agent import general_analysis_agent
+from agents.general.general_signal_agent import general_signal_agent
+from agents.general.general_writer_agent import general_writer_agent
 
 
-# ---------------- STATE ----------------
+# ================= STATE =================
 
 class AgentState(TypedDict):
     query: str
-    news_query: str
-    research_query: str
+    category: str
+    search_query: str
 
-    news: list          # 🔥 was str → now list
-    research: list
+    domain_news: list
+    domain_research: list
+    domain_signals: dict
 
-    run_news: bool
-    run_research: bool
-
+    final_digest: str
     evaluation: dict
     is_valid: bool
     confidence: float
-
-    processed: dict     # 🔥 was str → now dict
-    final: str
-    date: str           # 🔥 Add date field
-    loop_count: int     # 🔥 Add loop counter
+    loop_count: int
 
 
-# ---------------- NODES ----------------
+# ================= HELPERS =================
+
+def extract_json(text):
+    try:
+        if not text:
+            return None
+        text = text.replace("```json", "").replace("```", "").strip()
+        
+        object_match = re.search(r"\{[\s\S]*\}", text)
+        if object_match:
+            try: return json.loads(object_match.group(0))
+            except: pass
+            
+        array_match = re.search(r"\[[\s\S]*\]", text)
+        if array_match:
+            try: return json.loads(array_match.group(0))
+            except: pass
+            
+    except: pass
+    return None
+
+def invoke_agent_safe(agent, state_dict):
+    try:
+        response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:4000]}")]})
+        content = response["messages"][-1].content if "messages" in response else str(response)
+        parsed = extract_json(content)
+        return parsed or {}
+    except Exception as e:
+        print(f"[WARNING] Agent failed: {e}")
+        return {}
+
+def invoke_writer_safe(agent, state_dict):
+    try:
+        response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:4000]}")]})
+        content = response["messages"][-1].content if "messages" in response else str(response)
+        return content
+    except Exception as e:
+        print(f"[WARNING] Writer agent failed: {e}")
+        return ""
+
+
+# ================= ROUTER =================
 
 def supervisor_node(state: AgentState):
-    decision = supervisor_decision(state)
-    return decision
+    print("[ACTION] Running SUPERVISOR", flush=True)
+    return {}
 
-
-def news_node(state: AgentState):
-    print("[ACTION] Running NEWS TOOL (direct)", flush=True)
-
-    # Use the news-specific query
-    query = state.get("news_query") or state.get("query")
-    result = search_ai_news.invoke(query)
-
-    return {
-        "news": result.get("results", [])   # structured list
-    }
-
-from tools.arxiv_tool import fetch_arxiv_papers
-
-def research_node(state: AgentState):
-    print("[ACTION] Running RESEARCH TOOL (direct)")
-
-    # Use the research-specific query (more generic for better ArXiv results)
-    query = state.get("research_query") or "latest artificial intelligence breakthroughs"
-    
+def category_router_node(state: AgentState):
+    print("[ACTION] Running CATEGORY ROUTER AGENT", flush=True)
     try:
-        result = fetch_arxiv_papers.invoke(query)
-    except Exception as e:
-        print("[ERROR] Research error:", e)
-        result = []
+        response = category_router_agent.invoke({"messages": [("user", f"Query: {state.get('query')}")]})
+        content = response["messages"][-1].content if "messages" in response else str(response)
+        parsed = extract_json(content)
+        if isinstance(parsed, dict) and "category" in parsed:
+            cat = parsed["category"].lower()
+            if cat not in ["ai", "sports", "finance", "politics", "incidents", "general"]:
+                cat = "general"
+            return {"category": cat, "search_query": parsed.get("search_query", state.get("query"))}
+    except: pass
+    return {"category": "general", "search_query": state.get("query")}
 
-    return {
-        "research": result   # structured list
-    }
 
+# ================= AI PIPELINE =================
+
+def ai_news_node(state: AgentState):
+    print("[ACTION] AI: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def ai_relevance_node(state: AgentState):
+    print("[ACTION] AI: Relevance", flush=True)
+    res = invoke_agent_safe(ai_relevance_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def ai_research_node(state: AgentState):
+    print("[ACTION] AI: Research", flush=True)
+    res = invoke_agent_safe(ai_research_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def ai_signal_node(state: AgentState):
+    print("[ACTION] AI: Signal Processor", flush=True)
+    res = invoke_agent_safe(ai_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def ai_writer_node(state: AgentState):
+    print("[ACTION] AI: Writer", flush=True)
+    res = invoke_writer_safe(ai_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= SPORTS PIPELINE =================
+
+def sports_news_node(state: AgentState):
+    print("[ACTION] SPORTS: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def sports_match_analysis_node(state: AgentState):
+    print("[ACTION] SPORTS: Match Analysis", flush=True)
+    res = invoke_agent_safe(sports_match_analysis_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def sports_statistics_node(state: AgentState):
+    print("[ACTION] SPORTS: Statistics", flush=True)
+    res = invoke_agent_safe(sports_statistics_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def sports_signal_node(state: AgentState):
+    print("[ACTION] SPORTS: Signal Processor", flush=True)
+    res = invoke_agent_safe(sports_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def sports_writer_node(state: AgentState):
+    print("[ACTION] SPORTS: Writer", flush=True)
+    res = invoke_writer_safe(sports_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= FINANCE PIPELINE =================
+
+def finance_news_node(state: AgentState):
+    print("[ACTION] FINANCE: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def market_analysis_node(state: AgentState):
+    print("[ACTION] FINANCE: Market Analysis", flush=True)
+    res = invoke_agent_safe(market_analysis_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def economy_node(state: AgentState):
+    print("[ACTION] FINANCE: Economy", flush=True)
+    res = invoke_agent_safe(economy_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def finance_signal_node(state: AgentState):
+    print("[ACTION] FINANCE: Signal Processor", flush=True)
+    res = invoke_agent_safe(finance_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def finance_writer_node(state: AgentState):
+    print("[ACTION] FINANCE: Writer", flush=True)
+    res = invoke_writer_safe(finance_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= POLITICS PIPELINE =================
+
+def politics_news_node(state: AgentState):
+    print("[ACTION] POLITICS: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def policy_analysis_node(state: AgentState):
+    print("[ACTION] POLITICS: Policy Analysis", flush=True)
+    res = invoke_agent_safe(policy_analysis_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def geopolitics_node(state: AgentState):
+    print("[ACTION] POLITICS: Geopolitics", flush=True)
+    res = invoke_agent_safe(geopolitics_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def political_signal_node(state: AgentState):
+    print("[ACTION] POLITICS: Signal Processor", flush=True)
+    res = invoke_agent_safe(political_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def politics_writer_node(state: AgentState):
+    print("[ACTION] POLITICS: Writer", flush=True)
+    res = invoke_writer_safe(politics_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= INCIDENTS PIPELINE =================
+
+def incidents_news_node(state: AgentState):
+    print("[ACTION] INCIDENTS: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def crisis_verification_node(state: AgentState):
+    print("[ACTION] INCIDENTS: Crisis Verification", flush=True)
+    res = invoke_agent_safe(crisis_verification_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def severity_classification_node(state: AgentState):
+    print("[ACTION] INCIDENTS: Severity", flush=True)
+    res = invoke_agent_safe(severity_classification_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def incidents_signal_node(state: AgentState):
+    print("[ACTION] INCIDENTS: Signal Processor", flush=True)
+    res = invoke_agent_safe(incidents_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def incidents_writer_node(state: AgentState):
+    print("[ACTION] INCIDENTS: Writer", flush=True)
+    res = invoke_writer_safe(incidents_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= GENERAL PIPELINE =================
+
+def general_news_node(state: AgentState):
+    print("[ACTION] GENERAL: Fetching News", flush=True)
+    res = search_news.invoke(state.get("search_query"))
+    return {"domain_news": res.get("results", [])}
+
+def general_relevance_node(state: AgentState):
+    print("[ACTION] GENERAL: Relevance", flush=True)
+    res = invoke_agent_safe(general_relevance_agent, state.get("domain_news"))
+    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+
+def general_analysis_node(state: AgentState):
+    print("[ACTION] GENERAL: Analysis", flush=True)
+    res = invoke_agent_safe(general_analysis_agent, state.get("domain_news"))
+    return {"domain_research": res if isinstance(res, list) else []}
+
+def general_signal_node(state: AgentState):
+    print("[ACTION] GENERAL: Signal Processor", flush=True)
+    res = invoke_agent_safe(general_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
+    return {"domain_signals": res if isinstance(res, dict) else {}}
+
+def general_writer_node(state: AgentState):
+    print("[ACTION] GENERAL: Writer", flush=True)
+    res = invoke_writer_safe(general_writer_agent, state.get("domain_signals"))
+    return {"final_digest": str(res)}
+
+
+# ================= EVALUATION LOOP =================
 
 def evaluator_node(state: AgentState):
-    print("[ACTION] Running EVALUATOR", flush=True)
-
-    final_text = state.get("final", "")
-    processed = state.get("processed", {})
-    news = processed.get("news", [])
-    research = processed.get("research", [])
-
-    # Combine source data for evaluation
-    source_data = "--- NEWS ---\n" + "\n".join([
-        f"Title: {n.get('title')}\nContent: {n.get('content')[:3000]}\nURL: {n.get('url')}\nPublished: {n.get('published_date')}"
-        for n in news
-    ])
-    source_data += "\n\n--- RESEARCH ---\n" + "\n".join([
-        f"Title: {r.get('title')}\nSummary: {r.get('summary')}\nURL: {r.get('link')}\nPublished: {r.get('published_date')}"
-        for r in research
-    ])
-
-    eval_input = f"""
-SOURCE DATA:
-{source_data}
-
-GENERATED OUTPUT:
-{final_text}
-"""
-
-    response = evaluator_agent.invoke({
-        "messages": [("user", eval_input)]
-    })
-
-    try:
-        content = response["messages"][-1].content
-        if not isinstance(content, str):
-            content = str(content)
-
-        # Extract the most likely JSON object body.
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            content = content[start:end + 1]
-
-        result = json.loads(content)
-    except Exception as e:
-        print(f"[ERROR] Evaluator JSON error: {e}")
-        # Fallback to valid if parsing fails to avoid stuck loops
-        result = {"is_valid": True, "confidence": 1.0, "issues": []}
-
-    # Ensure issues is a string for the corrector
-    issues = result.get("issues", [])
-    if isinstance(issues, list):
-        issues = "\n".join(issues)
-
-    print(f"[INFO] Evaluator result: Valid={result.get('is_valid')}, Confidence={result.get('confidence')}, Loop={state.get('loop_count', 0)+1}")
-    if not result.get("is_valid"):
-        print(f"[INFO] Issues found: {issues}")
-
+    print("[ACTION] Running EVALUATOR AGENT", flush=True)
+    res = invoke_agent_safe(evaluator_agent, {"final_digest": state.get("final_digest")})
+    
+    is_valid = res.get("is_valid", True) if isinstance(res, dict) else True
     return {
-        "is_valid": result.get("is_valid", True),
-        "confidence": result.get("confidence", 1.0),
-        "evaluation": {**result, "issues": issues},
+        "is_valid": is_valid,
+        "evaluation": res if isinstance(res, dict) else {},
         "loop_count": state.get("loop_count", 0) + 1
     }
 
 def corrector_node(state: AgentState):
-    print("[ACTION] Running CORRECTOR")
-
-    final_text = state.get("final", "")
-    evaluation = state.get("evaluation", {})
-    issues = evaluation.get("issues", "General quality improvement needed.")
-
-    corrector_input = f"""
-GENERATED OUTPUT:
-{final_text}
-
-EVALUATION FEEDBACK:
-{issues}
-"""
-
-    response = corrector_agent.invoke({
-        "messages": [("user", corrector_input)]
-    })
-
-    return {"final": response["messages"][-1].content}
+    print("[ACTION] Running CORRECTOR AGENT", flush=True)
+    res = invoke_writer_safe(corrector_agent, {"digest": state.get("final_digest"), "feedback": state.get("evaluation")})
+    return {"final_digest": str(res)}
 
 
-
-
-def signal_node(state):
-    print("[ACTION] Running SIGNAL PROCESSOR", flush=True)
-
-    news = state.get("news", [])
-    research = state.get("research", [])
-
-    def domain_of(url: str) -> str:
-        if not url:
-            return ""
-        host = (urlparse(url).hostname or "").lower()
-        if host.startswith("www."):
-            host = host[4:]
-        return host
-
-    # ✅ Clean news
-    seen_titles = set()
-    seen_urls = set()
-    used_domains = set()
-    clean_news = []
-    for n in news:
-        title = (n.get("title") or "").strip()
-        url = (n.get("url") or "").strip()
-        content = (n.get("content") or "").strip()
-        if not title or not n.get("published_date") or not url:
-            continue
-        if len(content) < 120:
-            continue
-        key = title.lower()
-        url_key = url.lower()
-        if key in seen_titles or url_key in seen_urls:
-            continue
-        seen_titles.add(key)
-        seen_urls.add(url_key)
-
-        # Prefer source diversity so the digest isn't dominated by one outlet.
-        domain = domain_of(url)
-        if domain in used_domains and len(clean_news) >= 2:
-            continue
-        used_domains.add(domain)
-        clean_news.append(n)
-    
-    seen_papers = set()
-    clean_research = []
-    for r in research:
-        title = (r.get("title") or "").strip()
-        if not title:
-            continue
-        key = title.lower()
-        if key in seen_papers:
-            continue
-        seen_papers.add(key)
-        clean_research.append(r)
-    
-    print(f"[INFO] Processed {len(clean_news)} news items and {len(clean_research)} research papers.", flush=True)
-    for n in clean_news[:3]:
-        print(f"  - News: {n.get('title')}", flush=True)
-
-    return {
-        "processed": {
-            "news": clean_news[:3],
-            "research": clean_research[:3]
-        }
-    }
-
-
-def writer_node(state: AgentState):
-    print("[ACTION] Running WRITER", flush=True)
-
-    data = state.get("processed", {})
-    news = data.get("news", [])
-    research = data.get("research", [])
-    current_date = state.get("date", "Today")
-
-    if not news and not research:
-        return {"final": f"MORNING DIGEST - {current_date}\n\nWhat we cover today:\n- 0 news stories and 0 research papers from the last 24 hours."}
-
-    def clean_text(value: str) -> str:
-        if not value:
-            return ""
-        text = value
-        # Strip markdown links and headings commonly returned by extraction APIs.
-        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-        text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-        text = re.sub(r"\*+\s*", "", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
-
-    def split_sentences(text: str) -> list[str]:
-        if not text:
-            return []
-        text = re.sub(r"\s+", " ", text).strip()
-        parts = re.split(r"(?<=[.!?])\s+", text)
-        return [p.strip() for p in parts if p.strip()]
-
-    def normalize_sentence(s: str) -> str:
-        s = (s or "").replace("\u200b", " ").replace("\u2060", " ")
-        s = re.sub(r"\s+", " ", s).strip()
-        s = s.strip(" -*")
-        return s
-
-    def looks_complete(s: str) -> bool:
-        if not s:
-            return False
-        if s.endswith("..."):
-            return False
-        if len(s) < 45:
-            return False
-        if s[-1] not in ".!?":
-            return False
-        if re.search(r"\b(agains|propose an|training-free\.\.\.)\b", s.lower()):
-            return False
-        return True
-
-    def is_noise_sentence(sentence: str) -> bool:
-        lower = sentence.lower()
-        noise_signals = [
-            "register now",
-            "subscribe",
-            "sign up",
-            "cookie",
-            "advertisement",
-            "sponsored",
-            "newsletter",
-            "privacy policy",
-            "terms of service",
-            "contact us",
-            "confidential tip",
-            "reprints",
-            "permissions",
-            "skip ad",
-            "visit advertiser",
-            "skip to main content",
-            "browse world",
-            "browse business",
-            "browse markets",
-            "learn more about",
-            "buy one disrupt pass",
-            "bloomberg terminal",
-            "thomson reuters trust principles",
-            "purchase licensing rights",
-            "opens new tab",
-            "strictlyvc",
-            "disrupt pass",
-            "learn more",
-            "exclusive news",
-            "refinitiv",
-            "suggested topics",
-            "our standards",
-            "reporting by",
-            "editing by",
-        ]
-        if any(sig in lower for sig in noise_signals):
-            return True
-        if len(sentence) < 35:
-            return True
-        if sentence[:1] in {",", "|", ";", ":"}:
-            return True
-        if "http" in lower or "](" in sentence or "##" in sentence:
-            return True
-        if sum(ch.isalpha() for ch in sentence) < 20:
-            return True
-        if sentence.count("#") > 0 or sentence.count("[") > 1:
-            return True
-        if sum(1 for ch in sentence if ch in "|[]{}") >= 2:
-            return True
-        if sentence.count(" * ") >= 2:
-            return True
-        if len(sentence) > 420:
-            return True
-        return False
-
-    def extract_clean_sentences(text: str) -> list[str]:
-        raw = [normalize_sentence(s) for s in split_sentences(clean_text(text))]
-        candidates = []
-        seen = set()
-        for s in raw:
-            if not s or is_noise_sentence(s) or not looks_complete(s):
-                continue
-            key = s.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append(s)
-        return candidates
-
-    def rank_sentences(sentences: list[str]) -> list[str]:
-        strong_terms = [
-            "announced", "launched", "agreement", "partnership", "funding", "valuation",
-            "released", "introduces", "proposes", "results", "benchmark", "method",
-            "model", "inference", "deployment", "enterprise", "performance"
-        ]
-        return sorted(
-            sentences,
-            key=lambda s: (sum(1 for t in strong_terms if t in s.lower()), len(s)),
-            reverse=True,
-        )
-
-    stories = []
-    for item in news:
-        stories.append({
-            "kind": "NEWS",
-            "title": clean_text(item.get("title", "Untitled")),
-            "content": clean_text(item.get("content", "")),
-            "url": clean_text(item.get("url", "")) or "Not provided in source.",
-        })
-    for item in research:
-        stories.append({
-            "kind": "RESEARCH PAPER",
-            "title": clean_text(item.get("title", "Untitled")),
-            "content": clean_text(item.get("summary", "")),
-            "url": clean_text(item.get("link", "")) or "Not provided in source.",
-        })
-
-    def story_quality_rank(story: dict) -> tuple[int, int]:
-        content = clean_text(story.get("content", ""))
-        sentences = [s for s in split_sentences(content) if not is_noise_sentence(s)]
-        concrete_hits = sum(
-            1 for s in sentences
-            if any(k in s.lower() for k in ["announced", "agreement", "funding", "released", "model", "paper", "results", "method", "benchmark", "deployment"])
-        )
-        return (concrete_hits, len(sentences))
-
-    # Keep only items with enough clean source substance to avoid filler output.
-    def has_minimum_signal(story: dict) -> bool:
-        content = clean_text(story.get("content", ""))
-        sentences = [normalize_sentence(s) for s in split_sentences(content)]
-        sentences = [s for s in sentences if s and not is_noise_sentence(s) and looks_complete(s)]
-        return len(sentences) >= 2
-
-    stories = [s for s in stories if has_minimum_signal(s)]
-    stories = sorted(stories, key=story_quality_rank, reverse=True)[:6]
-
-    lines = []
-    lines.append(f"MORNING DIGEST - {current_date}")
-    lines.append("")
-    lines.append("What we cover today.")
-    story_count = len(stories)
-    research_count = len([s for s in stories if s["kind"] == "RESEARCH PAPER"])
-    lines.append(f"{story_count} stories from the last 24 hours, including {research_count} research papers.")
-    lines.append("")
-
-    section_idx = 1
-    for story in stories:
-        kind = story["kind"]
-        title = normalize_sentence(story["title"])
-        content = clean_text(story["content"])
-        url = story["url"]
-        clean_sentences = rank_sentences(extract_clean_sentences(content))
-
-        quick_take_sentences = clean_sentences[:2]
-        remaining = [s for s in clean_sentences if s.lower() not in {q.lower() for q in quick_take_sentences}]
-        what_to_know = remaining[:3]
-
-        lines.append(f"{section_idx:02d}. {kind} - {title}")
-        lines.append(title)
-        lines.append("QUICK TAKE:")
-        if quick_take_sentences:
-            for sent in quick_take_sentences:
-                lines.append(f"- {sent}")
-        else:
-            lines.append(f"- Headline from source: {title}")
-        lines.append("WHAT YOU NEED TO KNOW:")
-        if what_to_know:
-            for point in what_to_know:
-                lines.append(f"- {point}")
-        else:
-            # With minimum-signal filtering, this should be rare; keep concise fallback.
-            lines.append(f"- {quick_take_sentences[-1] if quick_take_sentences else 'Not enough extractable detail in source text.'}")
-        lines.append("SOURCE:")
-        lines.append(f"- {url}")
-        lines.append("")
-        section_idx += 1
-
-    source_domains = []
-    for item in stories:
-        host = (urlparse((item.get("url") or "")).hostname or "").lower()
-        if host.startswith("www."):
-            host = host[4:]
-        if host:
-            source_domains.append(host)
-    top_domains = Counter(source_domains).most_common(2)
-    domain_text = ", ".join([f"{domain} ({count})" for domain, count in top_domains]) if top_domains else "Not provided in source."
-
-    lines.append("Insights:")
-    lines.append(f"- Coverage includes {len(stories)} source-backed stories in this run.")
-    lines.append(f"- Most frequent source domains in this run: {domain_text}")
-
-    return {"final": "\n".join(lines)}
-# ---------------- GRAPH ----------------
+# ================= GRAPH =================
 
 def build_graph():
-
     builder = StateGraph(AgentState)
 
-    # Nodes
     builder.add_node("supervisor", supervisor_node)
-    builder.add_node("news", news_node)
-    builder.add_node("research", research_node)
+    builder.add_node("category_router", category_router_node)
+
+    # AI
+    builder.add_node("ai_news", ai_news_node)
+    builder.add_node("ai_relevance", ai_relevance_node)
+    builder.add_node("ai_research", ai_research_node)
+    builder.add_node("ai_signal", ai_signal_node)
+    builder.add_node("ai_writer", ai_writer_node)
+
+    # Sports
+    builder.add_node("sports_news", sports_news_node)
+    builder.add_node("sports_match_analysis", sports_match_analysis_node)
+    builder.add_node("sports_statistics", sports_statistics_node)
+    builder.add_node("sports_signal", sports_signal_node)
+    builder.add_node("sports_writer", sports_writer_node)
+
+    # Finance
+    builder.add_node("finance_news", finance_news_node)
+    builder.add_node("market_analysis", market_analysis_node)
+    builder.add_node("economy", economy_node)
+    builder.add_node("finance_signal", finance_signal_node)
+    builder.add_node("finance_writer", finance_writer_node)
+
+    # Politics
+    builder.add_node("politics_news", politics_news_node)
+    builder.add_node("policy_analysis", policy_analysis_node)
+    builder.add_node("geopolitics", geopolitics_node)
+    builder.add_node("political_signal", political_signal_node)
+    builder.add_node("politics_writer", politics_writer_node)
+
+    # Incidents
+    builder.add_node("incidents_news", incidents_news_node)
+    builder.add_node("crisis_verification", crisis_verification_node)
+    builder.add_node("severity_classification", severity_classification_node)
+    builder.add_node("incidents_signal", incidents_signal_node)
+    builder.add_node("incidents_writer", incidents_writer_node)
+
+    # General
+    builder.add_node("general_news", general_news_node)
+    builder.add_node("general_relevance", general_relevance_node)
+    builder.add_node("general_analysis", general_analysis_node)
+    builder.add_node("general_signal", general_signal_node)
+    builder.add_node("general_writer", general_writer_node)
+
+    # Eval
     builder.add_node("evaluator", evaluator_node)
     builder.add_node("corrector", corrector_node)
-    builder.add_node("signal", signal_node)
-    builder.add_node("writer", writer_node)
 
-    # Entry
     builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", "category_router")
 
-    # ---------------- ROUTING ----------------
+    def route_category(state):
+        cat = state.get("category", "general")
+        if cat == "ai": return "ai_news"
+        if cat == "sports": return "sports_news"
+        if cat == "finance": return "finance_news"
+        if cat == "politics": return "politics_news"
+        if cat == "incidents": return "incidents_news"
+        return "general_news"
 
-    def route(state):
-        routes = []
+    builder.add_conditional_edges("category_router", route_category)
 
-        if state.get("run_news"):
-            routes.append("news")
+    # AI Pipeline
+    builder.add_edge("ai_news", "ai_relevance")
+    builder.add_edge("ai_relevance", "ai_research")
+    builder.add_edge("ai_research", "ai_signal")
+    builder.add_edge("ai_signal", "ai_writer")
+    builder.add_edge("ai_writer", "evaluator")
 
-        if state.get("run_research"):
-            routes.append("research")
+    # Sports Pipeline
+    builder.add_edge("sports_news", "sports_match_analysis")
+    builder.add_edge("sports_match_analysis", "sports_statistics")
+    builder.add_edge("sports_statistics", "sports_signal")
+    builder.add_edge("sports_signal", "sports_writer")
+    builder.add_edge("sports_writer", "evaluator")
 
-        # fallback (VERY IMPORTANT)
-        if not routes:
-            routes = ["news", "research"]
+    # Finance Pipeline
+    builder.add_edge("finance_news", "market_analysis")
+    builder.add_edge("market_analysis", "economy")
+    builder.add_edge("economy", "finance_signal")
+    builder.add_edge("finance_signal", "finance_writer")
+    builder.add_edge("finance_writer", "evaluator")
 
-        return routes
+    # Politics Pipeline
+    builder.add_edge("politics_news", "policy_analysis")
+    builder.add_edge("policy_analysis", "geopolitics")
+    builder.add_edge("geopolitics", "political_signal")
+    builder.add_edge("political_signal", "politics_writer")
+    builder.add_edge("politics_writer", "evaluator")
 
-    builder.add_conditional_edges("supervisor", route)
+    # Incidents Pipeline
+    builder.add_edge("incidents_news", "crisis_verification")
+    builder.add_edge("crisis_verification", "severity_classification")
+    builder.add_edge("severity_classification", "incidents_signal")
+    builder.add_edge("incidents_signal", "incidents_writer")
+    builder.add_edge("incidents_writer", "evaluator")
 
-    # ---------------- FLOW ----------------
+    # General Pipeline
+    builder.add_edge("general_news", "general_relevance")
+    builder.add_edge("general_relevance", "general_analysis")
+    builder.add_edge("general_analysis", "general_signal")
+    builder.add_edge("general_signal", "general_writer")
+    builder.add_edge("general_writer", "evaluator")
 
-    # Both converge to signal
-    builder.add_edge("news", "signal")
-    builder.add_edge("research", "signal")
-
-    # Signal -> Writer -> Evaluator
-    builder.add_edge("signal", "writer")
-    builder.add_edge("writer", "evaluator")
-    
-    # Evaluation routing
     def eval_route(state):
-        # Deterministic writer is source-bound; end without rewrite loop.
-        return END
+        if state.get("is_valid"): return END
+        if state.get("loop_count", 0) >= 2: return END
+        return "corrector"
 
     builder.add_conditional_edges("evaluator", eval_route)
-    
-    # Corrector goes back to evaluator to verify the fix
     builder.add_edge("corrector", "evaluator")
 
     return builder.compile()

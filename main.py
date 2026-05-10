@@ -58,36 +58,36 @@ if __name__ == "__main__":
     from datetime import datetime, UTC
     current_date_str = datetime.now(UTC).strftime("%B %d, %Y")
     
+    user_query = input("\nEnter your news topic (e.g., 'latest NBA scores', 'AI funding', 'US elections'): ")
+    if not user_query.strip():
+        user_query = "latest major global news"
+
     initial_state = {
-        "query": "latest AI industry and research updates",
-        "news_query": "latest AI product announcements model releases enterprise AI funding regulation",
-        "research_query": "artificial intelligence language models multimodal reasoning agents",
+        "query": user_query,
+        "category": "",
+        "search_query": "",
         "date": current_date_str,
-
-        "news": [],
-        "research": [],
-
-        "run_news": False,
-        "run_research": False,
-
+        "domain_news": [],
+        "domain_research": [],
+        "domain_signals": {},
+        "final_digest": "",
         "evaluation": {},
         "is_valid": True,
         "confidence": 1.0,
-
-        "processed": {},
-        "final": "",
         "loop_count": 0
     }
 
     # 🚀 Run pipeline
     result = app.invoke(initial_state)
-    final_digest = result.get("final", "No output generated.")
+    final_digest = result.get("final_digest", "No output generated.")
+
+    print("\n" + "="*50)
+    print("FINAL DIGEST:")
+    print("="*50)
+    print(final_digest)
 
     try:
         pdf_path = export_digest_to_pdf(final_digest, output_dir=".")
         print(f"[SUCCESS] PDF digest saved at: {pdf_path}")
     except Exception as e:
         print(f"[WARNING] Failed to export PDF: {e}")
-
-    print("\n--- FINAL AI DIGEST ---\n")
-    print(final_digest)
