@@ -38,7 +38,7 @@ def header_footer(canvas, doc):
     canvas.restoreState()
 
 
-def export_digest_to_pdf(digest_text: str, output_dir: str = ".") -> str:
+def export_digest_to_pdf(digest_text: str, output_dir: str = ".", category: str = "") -> str:
     """
     Convert plain-text digest output into a styled PDF matching StayingAhead format.
     """
@@ -47,7 +47,10 @@ def export_digest_to_pdf(digest_text: str, output_dir: str = ".") -> str:
 
     lines = [line.rstrip() for line in digest_text.splitlines()]
     title = next((line for line in lines if line.strip() and not line.startswith("---")), "StayingAhead")
-    filename = f"{_safe_filename(title.lower())}.pdf"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    category_prefix = f"{category.lower()}_" if category else ""
+    filename = f"{category_prefix}{_safe_filename(title.lower())}_{timestamp}.pdf"
     output_path = Path(output_dir) / filename
 
     doc = BaseDocTemplate(

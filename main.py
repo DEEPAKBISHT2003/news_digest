@@ -87,7 +87,7 @@ if __name__ == "__main__":
     print(final_digest)
 
     try:
-        pdf_path = export_digest_to_pdf(final_digest, output_dir=".")
+        pdf_path = export_digest_to_pdf(final_digest, output_dir=".", category=result.get("category", ""))
         print(f"[SUCCESS] PDF digest saved at: {pdf_path}")
     except Exception as e:
         print(f"[WARNING] Failed to export PDF: {e}")

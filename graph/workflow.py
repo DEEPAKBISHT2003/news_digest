@@ -13,37 +13,31 @@ from agents.core.evaluator_agent import evaluator_agent
 from agents.core.corrector_agent import corrector_agent
 
 # Import domain agents
-from agents.ai.ai_news_agent import ai_news_agent
 from agents.ai.ai_relevance_agent import ai_relevance_agent
 from agents.ai.ai_research_agent import ai_research_agent
 from agents.ai.ai_signal_agent import ai_signal_agent
 from agents.ai.ai_writer_agent import ai_writer_agent
 
-from agents.sports.sports_news_agent import sports_news_agent
 from agents.sports.sports_match_analysis_agent import sports_match_analysis_agent
 from agents.sports.sports_statistics_agent import sports_statistics_agent
 from agents.sports.sports_signal_agent import sports_signal_agent
 from agents.sports.sports_writer_agent import sports_writer_agent
 
-from agents.finance.finance_news_agent import finance_news_agent
 from agents.finance.market_analysis_agent import market_analysis_agent
 from agents.finance.economy_agent import economy_agent
 from agents.finance.finance_signal_agent import finance_signal_agent
 from agents.finance.finance_writer_agent import finance_writer_agent
 
-from agents.politics.politics_news_agent import politics_news_agent
 from agents.politics.policy_analysis_agent import policy_analysis_agent
 from agents.politics.geopolitics_agent import geopolitics_agent
 from agents.politics.political_signal_agent import political_signal_agent
 from agents.politics.politics_writer_agent import politics_writer_agent
 
-from agents.incidents.incidents_news_agent import incidents_news_agent
 from agents.incidents.crisis_verification_agent import crisis_verification_agent
 from agents.incidents.severity_classification_agent import severity_classification_agent
 from agents.incidents.incidents_signal_agent import incidents_signal_agent
 from agents.incidents.incidents_writer_agent import incidents_writer_agent
 
-from agents.general.general_news_agent import general_news_agent
 from agents.general.general_relevance_agent import general_relevance_agent
 from agents.general.general_analysis_agent import general_analysis_agent
 from agents.general.general_signal_agent import general_signal_agent
@@ -134,7 +128,7 @@ def category_router_node(state: AgentState):
 
 def ai_news_node(state: AgentState):
     print("[ACTION] AI: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "ai"})
     return {"domain_news": res.get("results", [])}
 
 def ai_relevance_node(state: AgentState):
@@ -162,7 +156,7 @@ def ai_writer_node(state: AgentState):
 
 def sports_news_node(state: AgentState):
     print("[ACTION] SPORTS: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "sports"})
     return {"domain_news": res.get("results", [])}
 
 def sports_match_analysis_node(state: AgentState):
@@ -190,7 +184,7 @@ def sports_writer_node(state: AgentState):
 
 def finance_news_node(state: AgentState):
     print("[ACTION] FINANCE: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "finance"})
     return {"domain_news": res.get("results", [])}
 
 def market_analysis_node(state: AgentState):
@@ -218,7 +212,7 @@ def finance_writer_node(state: AgentState):
 
 def politics_news_node(state: AgentState):
     print("[ACTION] POLITICS: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "politics"})
     return {"domain_news": res.get("results", [])}
 
 def policy_analysis_node(state: AgentState):
@@ -246,7 +240,7 @@ def politics_writer_node(state: AgentState):
 
 def incidents_news_node(state: AgentState):
     print("[ACTION] INCIDENTS: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "incidents"})
     return {"domain_news": res.get("results", [])}
 
 def crisis_verification_node(state: AgentState):
@@ -274,7 +268,7 @@ def incidents_writer_node(state: AgentState):
 
 def general_news_node(state: AgentState):
     print("[ACTION] GENERAL: Fetching News", flush=True)
-    res = search_news.invoke(state.get("search_query"))
+    res = search_news.invoke({"query": state.get("search_query"), "category": "general"})
     return {"domain_news": res.get("results", [])}
 
 def general_relevance_node(state: AgentState):

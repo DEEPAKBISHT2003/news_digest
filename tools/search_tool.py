@@ -17,22 +17,33 @@ def is_within_24hrs(date_str):
     except Exception:
         return True
 
+DOMAIN_FILTERS = {
+    "finance": ["bloomberg.com", "ft.com", "wsj.com", "cnbc.com", "reuters.com", "marketwatch.com"],
+    "sports": ["espn.com", "theathletic.com", "cbssports.com", "si.com", "bleacherreport.com", "skysports.com"],
+    "ai": ["techcrunch.com", "wired.com", "arstechnica.com", "theverge.com", "venturebeat.com", "kdnuggets.com"],
+    "politics": ["politico.com", "reuters.com", "apnews.com", "thehill.com", "npr.org", "washingtonpost.com"],
+    "incidents": ["apnews.com", "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "nbcnews.com"],
+    "general": ["reuters.com", "apnews.com", "bbc.com", "theguardian.com", "npr.org", "nytimes.com"]
+}
+
 @tool
-def search_news(query: str) -> dict:
+def search_news(query: str, category: str = "general") -> dict:
     """
-    Fetch latest news using Tavily Search (Filtered for recent items).
+    Fetch latest news using Tavily Search, filtered by category-specific domains.
     """
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         return {"error": "TAVILY_API_KEY not found in environment"}
 
     client = TavilyClient(api_key=api_key)
+    domains = DOMAIN_FILTERS.get(category.lower(), DOMAIN_FILTERS["general"])
     
     try:
         results = client.search(
             query=query,
             search_depth="advanced",
             topic="news",
+            include_domains=domains,
             max_results=15,
         )
     except Exception as e:
@@ -61,13 +72,14 @@ def search_news(query: str) -> dict:
         }
         candidates.append(normalized)
 
-    # Fallback to general search if news search fails to get enough results
+    # Fallback to general search with domain filter if news search fails
     if len(candidates) < 2:
         try:
             general_results = client.search(
                 query=query,
                 search_depth="advanced",
                 topic="general",
+                include_domains=domains,
                 max_results=10,
             )
             for item in general_results.get("results", []):
