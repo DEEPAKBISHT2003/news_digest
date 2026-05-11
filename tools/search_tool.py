@@ -12,14 +12,14 @@ def is_within_24hrs(date_str):
             published = datetime.strptime(date_str.split(".")[0].replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
         else:
             published = datetime.strptime(date_str[:25].strip(), "%a, %d %b %Y %H:%M:%S")
-        is_recent = published >= datetime.utcnow() - timedelta(days=5) # Expanded to 5 days to ensure we get results
+        is_recent = published >= datetime.utcnow() - timedelta(days=1) # Strictly last 24 hours
         return is_recent
     except Exception:
         return True
 
 DOMAIN_FILTERS = {
     "finance": ["bloomberg.com", "ft.com", "wsj.com", "cnbc.com", "reuters.com", "marketwatch.com"],
-    "sports": ["espn.com", "theathletic.com", "cbssports.com", "si.com", "bleacherreport.com", "skysports.com"],
+    "sports": ["espn.com", "espncricinfo.com", "cricbuzz.com", "theathletic.com", "cbssports.com", "si.com", "skysports.com"],
     "ai": ["techcrunch.com", "wired.com", "arstechnica.com", "theverge.com", "venturebeat.com", "kdnuggets.com"],
     "politics": ["politico.com", "reuters.com", "apnews.com", "thehill.com", "npr.org", "washingtonpost.com"],
     "incidents": ["apnews.com", "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "nbcnews.com"],
@@ -44,7 +44,8 @@ def search_news(query: str, category: str = "general") -> dict:
             search_depth="advanced",
             topic="news",
             include_domains=domains,
-            max_results=15,
+            days=1,
+            max_results=6,
         )
     except Exception as e:
         return {"error": str(e)}
@@ -57,7 +58,7 @@ def search_news(query: str, category: str = "general") -> dict:
         if not is_within_24hrs(date_str):
             continue
 
-        content = (item.get("content") or "").strip()
+        content = (item.get("content") or "").strip()[:400]
         title = (item.get("title") or "").strip()
         url = (item.get("url") or "").strip()
         if not title or not url or len(content) < 50:
@@ -80,10 +81,11 @@ def search_news(query: str, category: str = "general") -> dict:
                 search_depth="advanced",
                 topic="general",
                 include_domains=domains,
-                max_results=10,
+                days=1,
+                max_results=5,
             )
             for item in general_results.get("results", []):
-                content = (item.get("content") or "").strip()
+                content = (item.get("content") or "").strip()[:400]
                 title = (item.get("title") or "").strip()
                 if not title or len(content) < 50:
                     continue
@@ -97,4 +99,4 @@ def search_news(query: str, category: str = "general") -> dict:
         except:
             pass
 
-    return {"results": candidates[:15]}
+    return {"results": candidates[:6]}

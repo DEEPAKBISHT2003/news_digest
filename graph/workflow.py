@@ -13,6 +13,13 @@ from agents.core.evaluator_agent import evaluator_agent
 from agents.core.corrector_agent import corrector_agent
 
 # Import domain agents
+
+from agents.ai.ai_news_agent import ai_news_agent
+from agents.sports.sports_news_agent import sports_news_agent
+from agents.finance.finance_news_agent import finance_news_agent
+from agents.politics.politics_news_agent import politics_news_agent
+from agents.incidents.incidents_news_agent import incidents_news_agent
+from agents.general.general_news_agent import general_news_agent
 from agents.ai.ai_relevance_agent import ai_relevance_agent
 from agents.ai.ai_research_agent import ai_research_agent
 from agents.ai.ai_signal_agent import ai_signal_agent
@@ -128,8 +135,8 @@ def category_router_node(state: AgentState):
 
 def ai_news_node(state: AgentState):
     print("[ACTION] AI: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "ai"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(ai_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def ai_relevance_node(state: AgentState):
     print("[ACTION] AI: Relevance", flush=True)
@@ -156,8 +163,8 @@ def ai_writer_node(state: AgentState):
 
 def sports_news_node(state: AgentState):
     print("[ACTION] SPORTS: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "sports"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(sports_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def sports_match_analysis_node(state: AgentState):
     print("[ACTION] SPORTS: Match Analysis", flush=True)
@@ -184,8 +191,8 @@ def sports_writer_node(state: AgentState):
 
 def finance_news_node(state: AgentState):
     print("[ACTION] FINANCE: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "finance"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(finance_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def market_analysis_node(state: AgentState):
     print("[ACTION] FINANCE: Market Analysis", flush=True)
@@ -212,8 +219,8 @@ def finance_writer_node(state: AgentState):
 
 def politics_news_node(state: AgentState):
     print("[ACTION] POLITICS: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "politics"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(politics_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def policy_analysis_node(state: AgentState):
     print("[ACTION] POLITICS: Policy Analysis", flush=True)
@@ -240,8 +247,8 @@ def politics_writer_node(state: AgentState):
 
 def incidents_news_node(state: AgentState):
     print("[ACTION] INCIDENTS: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "incidents"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(incidents_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def crisis_verification_node(state: AgentState):
     print("[ACTION] INCIDENTS: Crisis Verification", flush=True)
@@ -268,8 +275,8 @@ def incidents_writer_node(state: AgentState):
 
 def general_news_node(state: AgentState):
     print("[ACTION] GENERAL: Fetching News", flush=True)
-    res = search_news.invoke({"query": state.get("search_query"), "category": "general"})
-    return {"domain_news": res.get("results", [])}
+    res = invoke_agent_safe(general_news_agent, {"search_query": state.get("search_query")})
+    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
 
 def general_relevance_node(state: AgentState):
     print("[ACTION] GENERAL: Relevance", flush=True)

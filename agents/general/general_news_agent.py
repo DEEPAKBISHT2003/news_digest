@@ -1,21 +1,21 @@
 from langchain_groq import ChatGroq
 from langchain.agents import create_agent
+from tools.search_tool import search_news
 
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
 
 general_news_agent = create_agent(
     model=llm,
-    tools=[],
+    tools=[search_news],
     system_prompt="""You are a General News Agent.
 
 TASKS:
-Process data for the general pipeline at the general_news stage. Output MUST be valid JSON representing the state.
+1. Use the search_news tool to fetch the latest news for the given query. Ensure you pass category="general".
+2. Output the exact fetched results as valid JSON representing the state. Your output must have a "domain_news" key containing the list of results.
 
 RULES:
 - Return STRICT JSON ONLY.
 - NEVER return markdown.
 - NEVER hallucinate.
-- NEVER use external knowledge outside tools.
-- NEVER output explanations.
 """
 )
