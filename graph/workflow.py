@@ -90,24 +90,99 @@ def extract_json(text):
     except: pass
     return None
 
+import time
+
 def invoke_agent_safe(agent, state_dict):
-    try:
-        response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:4000]}")]})
-        content = response["messages"][-1].content if "messages" in response else str(response)
-        parsed = extract_json(content)
-        return parsed or {}
-    except Exception as e:
-        print(f"[WARNING] Agent failed: {e}")
-        return {}
+    max_retries = 3
+    retry_delay = 2
+    for attempt in range(max_retries):
+        try:
+            response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:4000]}")]})
+            messages = response.get("messages", []) if isinstance(response, dict) else []
+            # Scan all messages from last to first for valid JSON
+            for msg in reversed(messages):
+                content = msg.content if hasattr(msg, "content") else str(msg)
+                parsed = extract_json(content)
+                if parsed:
+                    return parsed
+            return {}
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                print(f"[WARNING] Rate limit hit. Retrying in {retry_delay}s... (Attempt {attempt+1})")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            print(f"[WARNING] Agent failed: {e}")
+            return {}
+
+def invoke_news_agent_safe(agent, search_query, category):
+    """Invoke a news-fetching agent and reliably extract articles from the response.
+    Scans all messages including tool results for news data."""
+    max_retries = 3
+    retry_delay = 2
+    for attempt in range(max_retries):
+        try:
+            response = agent.invoke({
+                "messages": [("user", f'Search for the latest news. Query: "{search_query}". Category: {category}. Call the search_news tool now.')]
+            })
+            messages = response.get("messages", []) if isinstance(response, dict) else []
+            articles = []
+            # Scan all messages for articles — tool results come before final AI message
+            for msg in messages:
+                content = msg.content if hasattr(msg, "content") else str(msg)
+                parsed = extract_json(content)
+                if not parsed:
+                    continue
+                # Handle various possible structures the agent/tool might return
+                if isinstance(parsed, list):
+                    articles = parsed
+                    break
+                if isinstance(parsed, dict):
+                    for key in ("domain_news", "results", "articles", "news", "items"):
+                        if key in parsed and isinstance(parsed[key], list):
+                            articles = parsed[key]
+                            break
+                if articles:
+                    break
+            print(f"[INFO] Agent fetched {len(articles)} articles for '{search_query}'", flush=True)
+            return articles
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                print(f"[WARNING] Rate limit hit. Retrying in {retry_delay}s... (Attempt {attempt+1})")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            print(f"[WARNING] News agent failed: {e}")
+            return []
 
 def invoke_writer_safe(agent, state_dict):
-    try:
-        response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:4000]}")]})
-        content = response["messages"][-1].content if "messages" in response else str(response)
-        return content
-    except Exception as e:
-        print(f"[WARNING] Writer agent failed: {e}")
-        return ""
+    max_retries = 3
+    retry_delay = 2
+    for attempt in range(max_retries):
+        try:
+            # Increase payload to 8000 chars so writers have more real news content
+            response = agent.invoke({"messages": [("user", f"DATA:\n{json.dumps(state_dict)[:8000]}")]})
+            content = response["messages"][-1].content if "messages" in response else str(response)
+            return content
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                print(f"[WARNING] Rate limit hit. Retrying in {retry_delay}s... (Attempt {attempt+1})")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            print(f"[WARNING] Writer agent failed: {e}")
+            return ""
+
+def build_writer_payload(state: AgentState) -> dict:
+    """Build a rich payload for writers containing all available data."""
+    return {
+        "query": state.get("query"),
+        "search_query": state.get("search_query"),
+        "date": state.get("date"),
+        "domain_news": state.get("domain_news", []),
+        "domain_research": state.get("domain_research", []),
+        "domain_signals": state.get("domain_signals", {}),
+    }
 
 
 # ================= ROUTER =================
@@ -135,27 +210,32 @@ def category_router_node(state: AgentState):
 
 def ai_news_node(state: AgentState):
     print("[ACTION] AI: Fetching News", flush=True)
-    res = invoke_agent_safe(ai_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(ai_news_agent, state.get("search_query"), "ai")
+    return {"domain_news": articles}
 
 def ai_relevance_node(state: AgentState):
     print("[ACTION] AI: Relevance", flush=True)
     res = invoke_agent_safe(ai_relevance_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def ai_research_node(state: AgentState):
     print("[ACTION] AI: Research", flush=True)
     res = invoke_agent_safe(ai_research_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def ai_signal_node(state: AgentState):
     print("[ACTION] AI: Signal Processor", flush=True)
     res = invoke_agent_safe(ai_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def ai_writer_node(state: AgentState):
     print("[ACTION] AI: Writer", flush=True)
-    res = invoke_writer_safe(ai_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(ai_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 
@@ -163,27 +243,32 @@ def ai_writer_node(state: AgentState):
 
 def sports_news_node(state: AgentState):
     print("[ACTION] SPORTS: Fetching News", flush=True)
-    res = invoke_agent_safe(sports_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(sports_news_agent, state.get("search_query"), "sports")
+    return {"domain_news": articles}
 
 def sports_match_analysis_node(state: AgentState):
     print("[ACTION] SPORTS: Match Analysis", flush=True)
     res = invoke_agent_safe(sports_match_analysis_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def sports_statistics_node(state: AgentState):
     print("[ACTION] SPORTS: Statistics", flush=True)
     res = invoke_agent_safe(sports_statistics_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def sports_signal_node(state: AgentState):
     print("[ACTION] SPORTS: Signal Processor", flush=True)
     res = invoke_agent_safe(sports_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def sports_writer_node(state: AgentState):
     print("[ACTION] SPORTS: Writer", flush=True)
-    res = invoke_writer_safe(sports_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(sports_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 
@@ -191,27 +276,32 @@ def sports_writer_node(state: AgentState):
 
 def finance_news_node(state: AgentState):
     print("[ACTION] FINANCE: Fetching News", flush=True)
-    res = invoke_agent_safe(finance_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(finance_news_agent, state.get("search_query"), "finance")
+    return {"domain_news": articles}
 
 def market_analysis_node(state: AgentState):
     print("[ACTION] FINANCE: Market Analysis", flush=True)
     res = invoke_agent_safe(market_analysis_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def economy_node(state: AgentState):
     print("[ACTION] FINANCE: Economy", flush=True)
     res = invoke_agent_safe(economy_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def finance_signal_node(state: AgentState):
     print("[ACTION] FINANCE: Signal Processor", flush=True)
     res = invoke_agent_safe(finance_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def finance_writer_node(state: AgentState):
     print("[ACTION] FINANCE: Writer", flush=True)
-    res = invoke_writer_safe(finance_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(finance_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 
@@ -219,27 +309,32 @@ def finance_writer_node(state: AgentState):
 
 def politics_news_node(state: AgentState):
     print("[ACTION] POLITICS: Fetching News", flush=True)
-    res = invoke_agent_safe(politics_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(politics_news_agent, state.get("search_query"), "politics")
+    return {"domain_news": articles}
 
 def policy_analysis_node(state: AgentState):
     print("[ACTION] POLITICS: Policy Analysis", flush=True)
     res = invoke_agent_safe(policy_analysis_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def geopolitics_node(state: AgentState):
     print("[ACTION] POLITICS: Geopolitics", flush=True)
     res = invoke_agent_safe(geopolitics_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def political_signal_node(state: AgentState):
     print("[ACTION] POLITICS: Signal Processor", flush=True)
     res = invoke_agent_safe(political_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def politics_writer_node(state: AgentState):
     print("[ACTION] POLITICS: Writer", flush=True)
-    res = invoke_writer_safe(politics_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(politics_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 
@@ -247,27 +342,32 @@ def politics_writer_node(state: AgentState):
 
 def incidents_news_node(state: AgentState):
     print("[ACTION] INCIDENTS: Fetching News", flush=True)
-    res = invoke_agent_safe(incidents_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(incidents_news_agent, state.get("search_query"), "incidents")
+    return {"domain_news": articles}
 
 def crisis_verification_node(state: AgentState):
     print("[ACTION] INCIDENTS: Crisis Verification", flush=True)
     res = invoke_agent_safe(crisis_verification_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def severity_classification_node(state: AgentState):
     print("[ACTION] INCIDENTS: Severity", flush=True)
     res = invoke_agent_safe(severity_classification_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def incidents_signal_node(state: AgentState):
     print("[ACTION] INCIDENTS: Signal Processor", flush=True)
     res = invoke_agent_safe(incidents_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def incidents_writer_node(state: AgentState):
     print("[ACTION] INCIDENTS: Writer", flush=True)
-    res = invoke_writer_safe(incidents_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(incidents_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 
@@ -275,27 +375,32 @@ def incidents_writer_node(state: AgentState):
 
 def general_news_node(state: AgentState):
     print("[ACTION] GENERAL: Fetching News", flush=True)
-    res = invoke_agent_safe(general_news_agent, {"search_query": state.get("search_query")})
-    return {"domain_news": res.get("domain_news", []) if isinstance(res, dict) else []}
+    articles = invoke_news_agent_safe(general_news_agent, state.get("search_query"), "general")
+    return {"domain_news": articles}
 
 def general_relevance_node(state: AgentState):
     print("[ACTION] GENERAL: Relevance", flush=True)
     res = invoke_agent_safe(general_relevance_agent, state.get("domain_news"))
-    return {"domain_news": res if isinstance(res, list) else state.get("domain_news")}
+    if isinstance(res, list): return {"domain_news": res}
+    if isinstance(res, dict) and "domain_news" in res: return {"domain_news": res["domain_news"]}
+    return {}  # preserve existing domain_news
 
 def general_analysis_node(state: AgentState):
     print("[ACTION] GENERAL: Analysis", flush=True)
     res = invoke_agent_safe(general_analysis_agent, state.get("domain_news"))
-    return {"domain_research": res if isinstance(res, list) else []}
+    if isinstance(res, list): return {"domain_research": res}
+    if isinstance(res, dict) and "domain_research" in res: return {"domain_research": res["domain_research"]}
+    return {"domain_research": state.get("domain_news", [])}  # fallback: use news as research
 
 def general_signal_node(state: AgentState):
     print("[ACTION] GENERAL: Signal Processor", flush=True)
     res = invoke_agent_safe(general_signal_agent, {"news": state.get("domain_news"), "research": state.get("domain_research")})
-    return {"domain_signals": res if isinstance(res, dict) else {}}
+    signals = res if isinstance(res, dict) and res else {"items": state.get("domain_news", [])}
+    return {"domain_signals": signals}
 
 def general_writer_node(state: AgentState):
     print("[ACTION] GENERAL: Writer", flush=True)
-    res = invoke_writer_safe(general_writer_agent, state.get("domain_signals"))
+    res = invoke_writer_safe(general_writer_agent, build_writer_payload(state))
     return {"final_digest": str(res)}
 
 

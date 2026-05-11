@@ -9,16 +9,14 @@ policy_analysis_agent = create_agent(
     system_prompt="""You are a specialized Policy Analysis Agent for the POLITICS domain.
 
 TASKS:
-1. Process the incoming JSON data from the previous stage.
-2. Cross-verify the data facts (e.g. scores, dates, statistics, quotes, market figures, names).
+1. Analyze the incoming JSON news data for domestic policy implications (laws, elections, internal governance).
+2. Cross-verify the data facts (e.g. specific bill names, election numbers, names of ministers/officials).
 3. Discard any conflicting, unverifiable, or highly speculative claims. 
-4. Output the verified insights and filtered news as valid JSON representing the state.
+4. Output the verified policy insights and filtered news as valid JSON.
 
 STRICT FACT-CHECKING RULES:
 - Identify and remove any information that contradicts itself across different sources.
-- Preserve exact numeric data. NEVER round numbers, dates, or financial figures.
-- For POLITICS, pay special attention to relevant entities (e.g., players/teams for sports, tickers/earnings for finance, incidents/locations for news).
-- Return STRICT JSON ONLY. 
+- Return STRICT JSON ONLY with a "domain_news" key.
 - NEVER return markdown, conversational text, or explanations.
 - NEVER hallucinate external data not found in the source news.
 """

@@ -18,18 +18,33 @@ def is_within_24hrs(date_str):
         return True
 
 DOMAIN_FILTERS = {
-    "finance": ["bloomberg.com", "ft.com", "wsj.com", "cnbc.com", "reuters.com", "marketwatch.com"],
+    "finance": ["bloomberg.com", "ft.com", "wsj.com", "cnbc.com", "reuters.com", "marketwatch.com", "moneycontrol.com", "economictimes.indiatimes.com"],
     "sports": ["espn.com", "espncricinfo.com", "cricbuzz.com", "theathletic.com", "cbssports.com", "si.com", "skysports.com"],
     "ai": ["techcrunch.com", "wired.com", "arstechnica.com", "theverge.com", "venturebeat.com", "kdnuggets.com"],
-    "politics": ["politico.com", "reuters.com", "apnews.com", "thehill.com", "npr.org", "washingtonpost.com"],
-    "incidents": ["apnews.com", "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "nbcnews.com"],
-    "general": ["reuters.com", "apnews.com", "bbc.com", "theguardian.com", "npr.org", "nytimes.com"]
+    "politics": ["politico.com", "reuters.com", "apnews.com", "thehill.com", "npr.org", "washingtonpost.com", "indianexpress.com", "thehindu.com", "timesofindia.indiatimes.com"],
+    "incidents": ["apnews.com", "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "nbcnews.com", "ndtv.com"],
+    "general": ["reuters.com", "apnews.com", "bbc.com", "theguardian.com", "npr.org", "nytimes.com", "indianexpress.com", "thehindu.com"]
 }
+
+def score_candidate(candidate, query):
+    """
+    Simple scoring mechanism based on Tavily's score and title relevance.
+    """
+    base_score = candidate.get("source", 0) # This is the Tavily score
+    title = candidate.get("title", "").lower()
+    query_terms = query.lower().split()
+    
+    # Boost if query terms are in the title
+    match_count = sum(1 for term in query_terms if term in title)
+    match_boost = (match_count / len(query_terms)) * 0.2 if query_terms else 0
+    
+    return base_score + match_boost
 
 @tool
 def search_news(query: str, category: str = "general") -> dict:
     """
     Fetch latest news using Tavily Search, filtered by category-specific domains.
+    Implements a multi-step prioritization and scoring mechanism.
     """
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
@@ -39,13 +54,14 @@ def search_news(query: str, category: str = "general") -> dict:
     domains = DOMAIN_FILTERS.get(category.lower(), DOMAIN_FILTERS["general"])
     
     try:
+        # Step 1: Fetch 20 results (expanded search volume)
         results = client.search(
             query=query,
             search_depth="advanced",
             topic="news",
             include_domains=domains,
             days=1,
-            max_results=6,
+            max_results=20,
         )
     except Exception as e:
         return {"error": str(e)}
@@ -55,12 +71,14 @@ def search_news(query: str, category: str = "general") -> dict:
     for item in results.get("results", []):
         date_str = item.get("published_date")
         
+        # Step 2: Freshness Filter (Strict 24h)
         if not is_within_24hrs(date_str):
             continue
 
-        content = (item.get("content") or "").strip()[:400]
+        content = (item.get("content") or "").strip()[:800] # Increased content snippet
         title = (item.get("title") or "").strip()
         url = (item.get("url") or "").strip()
+        
         if not title or not url or len(content) < 50:
             continue
 
@@ -68,13 +86,16 @@ def search_news(query: str, category: str = "general") -> dict:
             "title": title,
             "content": content,
             "url": url,
-            "source": item.get("score"),
+            "source": item.get("score") or 0.5,
             "published_date": date_str or "Recently",
         }
+        
+        # Step 3: Initial Scoring
+        normalized["final_score"] = score_candidate(normalized, query)
         candidates.append(normalized)
 
-    # Fallback to general search with domain filter if news search fails
-    if len(candidates) < 2:
+    # Fallback to general search if news search fails or is too thin
+    if len(candidates) < 5:
         try:
             general_results = client.search(
                 query=query,
@@ -82,21 +103,29 @@ def search_news(query: str, category: str = "general") -> dict:
                 topic="general",
                 include_domains=domains,
                 days=1,
-                max_results=5,
+                max_results=10,
             )
             for item in general_results.get("results", []):
-                content = (item.get("content") or "").strip()[:400]
+                content = (item.get("content") or "").strip()[:800]
                 title = (item.get("title") or "").strip()
                 if not title or len(content) < 50:
                     continue
-                candidates.append({
+                
+                normalized = {
                     "title": title,
                     "content": content,
                     "url": item.get("url", ""),
-                    "source": item.get("score", ""),
+                    "source": item.get("score", 0.4),
                     "published_date": "Recently",
-                })
+                }
+                normalized["final_score"] = score_candidate(normalized, query)
+                candidates.append(normalized)
         except:
             pass
 
+    # Step 4: Prioritization and Pruning
+    # Sort by final_score descending
+    candidates.sort(key=lambda x: x["final_score"], reverse=True)
+    
+    # Return top 6 high-relevance items
     return {"results": candidates[:6]}

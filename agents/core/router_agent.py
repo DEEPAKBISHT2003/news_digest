@@ -19,17 +19,18 @@ Available Categories:
 
 TASKS:
 1. Detect category from user query.
-2. Generate an optimized search query.
+2. Generate an optimized, specific search query that will fetch the most relevant and recent news for the user's topic.
 
 OUTPUT FORMAT (STRICT JSON):
 {
   "category": "sports",
-  "search_query": "latest NFL scores and transfers"
+  "search_query": "<optimized search query based ON THE USER'S INPUT>"
 }
 
 RULES:
 - Return STRICT JSON ONLY.
 - NEVER return markdown.
 - NEVER hallucinate.
+- DO NOT default to examples. Use the actual user query to build the search_query.
 """
 )

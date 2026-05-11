@@ -126,13 +126,14 @@ def export_digest_to_pdf(digest_text: str, output_dir: str = ".", category: str 
     
     inside_article = False
 
-    for raw_line in lines:
+    for idx, raw_line in enumerate(lines):
         line = raw_line.strip()
         if not line:
             continue
             
         if line.startswith("---"):
-            if inside_article:
+            # Only add PageBreak if we've already started an article AND there are more lines coming
+            if inside_article and any(l.strip() and not l.strip().startswith("---") for l in lines[idx+1:]):
                 story.append(PageBreak())
             inside_article = True
             continue
@@ -144,7 +145,13 @@ def export_digest_to_pdf(digest_text: str, output_dir: str = ".", category: str 
             story.append(Paragraph(escaped, article_number_style))
             continue
             
-        if line.upper() in {"QUICK TAKE", "WHAT YOU NEED TO KNOW", "WHY IT MATTERS", "THE BIG PICTURE", "THE LONG ARC", "WHAT TO WATCH", "DO THIS TODAY", "IF YOU TAKE ONE THING FROM THIS", "AI DIGEST . LAST 24 HOURS"}:
+        if line.upper() in {
+            "QUICK TAKE", "WHAT YOU NEED TO KNOW", "WHY IT MATTERS", "THE BIG PICTURE", 
+            "THE LONG ARC", "WHAT TO WATCH", "DO THIS TODAY", "IF YOU TAKE ONE THING FROM THIS", 
+            "AI DIGEST . LAST 24 HOURS", "SPORTS DIGEST . LAST 24 HOURS", "FINANCE DIGEST . LAST 24 HOURS",
+            "POLITICS DIGEST . LAST 24 HOURS", "INCIDENTS DIGEST . LAST 24 HOURS", "GENERAL DIGEST . LAST 24 HOURS",
+            "T O D AY ' S  H E A D L I N E", "SENT BY", "WHAT WE COVER TODAY."
+        }:
             story.append(Paragraph(escaped, heading))
             continue
 
