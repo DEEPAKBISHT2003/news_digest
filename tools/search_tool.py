@@ -54,14 +54,14 @@ def search_news(query: str, category: str = "general") -> dict:
     domains = DOMAIN_FILTERS.get(category.lower(), DOMAIN_FILTERS["general"])
     
     try:
-        # Step 1: Fetch 20 results (expanded search volume)
+        # Step 1: Fetch 40 results (expanded search volume)
         results = client.search(
             query=query,
             search_depth="advanced",
             topic="news",
             include_domains=domains,
             days=1,
-            max_results=20,
+            max_results=40,
         )
     except Exception as e:
         return {"error": str(e)}
@@ -95,7 +95,7 @@ def search_news(query: str, category: str = "general") -> dict:
         candidates.append(normalized)
 
     # Fallback to general search if news search fails or is too thin
-    if len(candidates) < 5:
+    if len(candidates) < 10:
         try:
             general_results = client.search(
                 query=query,
@@ -103,7 +103,7 @@ def search_news(query: str, category: str = "general") -> dict:
                 topic="general",
                 include_domains=domains,
                 days=1,
-                max_results=10,
+                max_results=20,
             )
             for item in general_results.get("results", []):
                 content = (item.get("content") or "").strip()[:800]
@@ -127,5 +127,5 @@ def search_news(query: str, category: str = "general") -> dict:
     # Sort by final_score descending
     candidates.sort(key=lambda x: x["final_score"], reverse=True)
     
-    # Return top 6 high-relevance items
-    return {"results": candidates[:6]}
+    # Return top 5 high-relevance items (MAX_TAVILY_RESULTS)
+    return {"results": candidates[:5]}
